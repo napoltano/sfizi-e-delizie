@@ -108,8 +108,18 @@ header h1 small{display:block;font:500 11px system-ui,sans-serif;letter-spacing:
 .modal{background:var(--card);width:100%;max-width:560px;max-height:92vh;overflow:auto;border-radius:16px 16px 0 0;padding:18px 16px 20px}
 @media(min-width:640px){.modal-bg{align-items:center}.modal{border-radius:16px}}
 .modal h3{margin:0 0 6px;font-size:18px}
-.scan-live{width:100%;border-radius:12px;overflow:hidden;background:#111;margin:10px 0;min-height:0}
-.scan-live:empty{display:none}
+.scan-wrap{position:relative;margin:10px 0 8px;border-radius:16px;overflow:hidden;background:#111;min-height:220px}
+.scan-live{width:100%;min-height:220px}
+.scan-live.off{min-height:0}
+.scan-live video{width:100%!important;display:block;object-fit:cover}
+.scan-live img,.scan-live #qr-shaded-region ~ div{display:none}
+.scan-laser{position:absolute;left:12%;right:12%;top:50%;height:2px;background:#ff3b3b;box-shadow:0 0 10px 2px rgba(255,59,59,.7);animation:laser 1.6s ease-in-out infinite;pointer-events:none}
+@keyframes laser{0%,100%{transform:translateY(-42px)}50%{transform:translateY(42px)}}
+.scan-ok{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:72px;color:#fff;background:rgba(31,122,77,.55);pointer-events:none}
+.scan-ok.go{animation:okflash .6s ease forwards}
+@keyframes okflash{0%{opacity:0;transform:scale(.7)}30%{opacity:1;transform:scale(1)}100%{opacity:0}}
+.scan-msg{text-align:center;margin:4px 0 8px;color:var(--mu)}
+@media(max-width:640px){.scan-modal{max-height:96vh}}
 .toasts{position:fixed;left:50%;transform:translateX(-50%);bottom:84px;z-index:60;display:flex;flex-direction:column;gap:6px;align-items:center;width:max-content;max-width:92vw}
 .toast{background:#1d2420;color:#fff;padding:10px 14px;border-radius:10px;font-size:14px;box-shadow:0 6px 20px rgba(0,0,0,.2)}
 .toast.err{background:var(--red)}.toast.warn{background:var(--or)}
@@ -344,7 +354,6 @@ body.dark .hello-chips .warn{background:#4a1f1a;color:#f4b1a8}
   </section>
 </main>
 <div class="toasts" id="toasts"></div>
-<div id="scanFileReader" style="display:none"></div>
 
 <script>
 "use strict";
@@ -478,61 +487,58 @@ function fmts() {
   const F = window.Html5QrcodeSupportedFormats; if (!F) return undefined;
   return ['EAN_13','EAN_8','UPC_A','UPC_E','CODE_128','CODE_39','ITF','QR_CODE'].map(k => F[k]).filter(v => v !== undefined);
 }
-async function shrink(file) {
-  try {
-    const bmp = await createImageBitmap(file); const max = 1600, k = Math.min(1, max / Math.max(bmp.width, bmp.height));
-    const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
-    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
-    return await new Promise(r => c.toBlob(b => r(b ? new File([b], 'scan.jpg', {type:'image/jpeg'}) : file), 'image/jpeg', .92));
-  } catch(e) { return file; }
-}
-async function decodeFile(file) {
-  const small = await shrink(file);
-  if ('BarcodeDetector' in window) {
-    try { const bd = new BarcodeDetector(); for (const f of [small, file]) { const r = await bd.detect(await createImageBitmap(f)); if (r && r.length) return r[0].rawValue; } } catch(e) {}
-  }
-  if (window.Html5Qrcode) {
-    for (const f of [small, file]) {
-      const rd = new Html5Qrcode('scanFileReader', { formatsToSupport: fmts(), verbose: false });
-      try { return await rd.scanFile(f, false); } catch(e) {} finally { try { rd.clear(); } catch(e) {} }
-    }
-  }
-  return null;
-}
-function openScanner(onCode, { continuous = false, title = 'Scansiona codice a barre' } = {}) {
+function openScanner(onCode, { continuous = false, title = 'Lettore codice a barre' } = {}) {
   const m = openModal('<h3>' + esc(title) + '</h3>' +
-    '<div id="scanLive" class="scan-live"></div><div id="scanMsg" class="muted small" style="margin:6px 0 10px">Avvio fotocamera…</div>' +
-    '<label class="btn primary big full" style="cursor:pointer">📷 Scatta foto del codice<input type="file" accept="image/*" capture="environment" hidden id="scanFile"></label>' +
-    '<form id="scanManual" class="row" style="margin-top:10px"><input id="scanManualIn" inputmode="numeric" placeholder="…oppure scrivi il codice a mano"><button class="btn">OK</button></form>' +
-    '<div id="scanLast" class="muted small" style="margin-top:8px"></div>' +
+    '<div class="scan-wrap"><div id="scanLive" class="scan-live"></div><div class="scan-laser" hidden></div><div class="scan-ok" hidden>✓</div></div>' +
+    '<div id="scanMsg" class="small scan-msg">📷 Avvio del lettore…</div>' +
+    '<div class="row" style="justify-content:center;gap:8px;margin-bottom:6px"><button type="button" class="btn" id="scanTorch" hidden>🔦 Torcia</button><button type="button" class="btn" id="scanRetry" hidden>↻ Riprova</button></div>' +
+    '<form id="scanManual" class="row" style="margin-top:6px"><input id="scanManualIn" inputmode="numeric" placeholder="Codice illeggibile? Scrivilo qui"><button class="btn">OK</button></form>' +
+    '<div id="scanLast" class="small" style="margin-top:8px;font-weight:600;color:var(--ok)"></div>' +
     '<div class="row-end"><button class="btn" data-close>' + (continuous ? 'Fine' : 'Chiudi') + '</button></div>');
-  let live = null, lastCode = '', lastT = 0, closed = false;
-  const msg = t => { const e = m.querySelector('#scanMsg'); if (e) e.textContent = t; };
+  m.querySelector('.modal').classList.add('scan-modal');
+  let live = null, lastCode = '', lastT = 0, closed = false, torch = false;
+  const msg = t => { const e = m.querySelector('#scanMsg'); if (e) e.innerHTML = t; };
   const deliver = code => {
     code = String(code || '').trim(); if (!code || closed) return;
-    const now = Date.now(); if (code === lastCode && now - lastT < 2000) return; lastCode = code; lastT = now;
-    beep(); const res = onCode(code);
-    if (!continuous) closeModal(m); else m.querySelector('#scanLast').textContent = '✓ Letto: ' + code + (res ? ' — ' + res : '');
+    const now = Date.now(), mm = document.querySelectorAll('.modal-bg');
+    if (mm[mm.length - 1] !== m) { if (code === lastCode) lastT = now; return; } // c'è una finestra aperta sopra il lettore: in pausa
+    if (code === lastCode && now - lastT < 2500) { lastT = now; return; } lastCode = code; lastT = now;
+    beep(); const ok = m.querySelector('.scan-ok'); ok.hidden = false; ok.classList.remove('go'); void ok.offsetWidth; ok.classList.add('go'); setTimeout(() => ok.hidden = true, 600);
+    const res = onCode(code);
+    if (!continuous) setTimeout(() => closeModal(m), 250); else m.querySelector('#scanLast').textContent = '✓ ' + code + (res ? ' — ' + res : '');
   };
-  m._onclose = () => { closed = true; if (live) { live.stop().then(() => live.clear()).catch(() => {}); } };
-  m.querySelector('#scanFile').onchange = async e => {
-    const f = e.target.files[0]; e.target.value = ''; if (!f) return;
-    msg('Lettura della foto…');
-    const code = await decodeFile(f);
-    if (code) { msg('Codice letto ✓'); deliver(code); }
-    else { beep(false); msg('Codice non leggibile: riprova avvicinandoti, con più luce e il codice dritto, oppure scrivilo a mano.'); }
-  };
+  const stop = () => { if (live) { const l = live; live = null; l.stop().then(() => l.clear()).catch(() => {}); } };
+  m._onclose = () => { closed = true; stop(); };
   m.querySelector('#scanManual').onsubmit = e => { e.preventDefault(); const i = m.querySelector('#scanManualIn'); const v = i.value; i.value = ''; lastCode = ''; deliver(v); };
-  // fotocamera in diretta (se il browser la consente)
-  if (window.Html5Qrcode && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+  m.querySelector('#scanTorch').onclick = async () => { try { torch = !torch; await live.applyVideoConstraints({ advanced: [{ torch }] }); m.querySelector('#scanTorch').classList.toggle('primary', torch); } catch(e) { toast('Torcia non disponibile', 'warn'); } };
+  const start = () => {
+    m.querySelector('#scanRetry').hidden = true;
+    if (IN_CLAUDE) { msg('⚠️ Qui dentro Claude il browser non permette la fotocamera.<br>Usa l’<b>app Sfizi e Delizie</b> (napoltano.github.io/sfizi-e-delizie) per il lettore, oppure scrivi il codice qui sotto.'); m.querySelector('#scanLive').classList.add('off'); return; }
+    if (!window.Html5Qrcode || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { msg('⚠️ Questo browser non supporta il lettore con fotocamera. Scrivi il codice qui sotto.'); return; }
     try {
       live = new Html5Qrcode('scanLive', { formatsToSupport: fmts(), verbose: false, experimentalFeatures: { useBarCodeDetectorIfSupported: true } });
-      live.start({ facingMode: 'environment' }, { fps: 12, qrbox: (w, h) => ({ width: Math.min(300, w * .9), height: Math.min(150, h * .6) }) },
+      live.start({ facingMode: 'environment' },
+        { fps: 15, aspectRatio: 1.333, disableFlip: true, qrbox: (w, hh) => ({ width: Math.round(Math.min(340, w * .88)), height: Math.round(Math.min(160, hh * .5)) }),
+          videoConstraints: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 960 }, focusMode: 'continuous' } },
         t => deliver(t), () => {})
-        .then(() => { if (closed) { live.stop().catch(()=>{}); } msg('Inquadra il codice a barre dentro il riquadro'); })
-        .catch(() => { live = null; const el = m.querySelector('#scanLive'); if (el) el.innerHTML = ''; msg('Scatta una foto del codice a barre (inquadratura vicina e nitida).'); });
-    } catch(e) { live = null; msg('Scatta una foto del codice a barre.'); }
-  } else msg('Scatta una foto del codice a barre.');
+        .then(() => {
+          if (closed) { stop(); return; }
+          m.querySelector('.scan-laser').hidden = false;
+          msg('Inquadra il codice a barre nel riquadro: si legge da solo' + (continuous ? ', uno dopo l’altro' : '') + '.');
+          try { const c = live.getRunningTrackCapabilities(); if (c && c.torch) m.querySelector('#scanTorch').hidden = false; } catch(e) {}
+        })
+        .catch(err => {
+          live = null; const el = m.querySelector('#scanLive'); if (el) el.innerHTML = '';
+          const s = String(err && (err.name || err) || '');
+          msg(/NotAllowed|Permission/i.test(s) ? '🔒 Serve il permesso per la fotocamera: consentilo nel browser (icona del lucchetto accanto all’indirizzo) e premi Riprova.'
+            : /NotFound|Overconstrained/i.test(s) ? '⚠️ Nessuna fotocamera trovata su questo dispositivo. Scrivi il codice qui sotto.'
+            : '⚠️ Non riesco ad avviare la fotocamera (forse è usata da un’altra app). Premi Riprova.');
+          m.querySelector('#scanRetry').hidden = false;
+        });
+    } catch(e) { live = null; msg('⚠️ Non riesco ad avviare il lettore. Premi Riprova.'); m.querySelector('#scanRetry').hidden = false; }
+  };
+  m.querySelector('#scanRetry').onclick = start;
+  start();
   return m;
 }
 
