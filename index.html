@@ -133,6 +133,10 @@ header h1 small{display:block;font:500 11px system-ui,sans-serif;letter-spacing:
 .seg button{border:0;background:var(--card);padding:7px 12px;cursor:pointer;font-size:13px}
 .seg button.on{background:var(--g);color:#fff}
 [hidden]{display:none!important}
+.pcard{display:flex;gap:10px;align-items:center;padding:10px;margin-top:8px;border-radius:14px;background:var(--hov);box-shadow:inset 0 0 0 1px var(--bd)}
+.qinfo{margin-top:2px}
+.qbig{width:56px;height:56px;flex:0 0 56px;font-size:26px}
+.qinput{font-size:28px;text-align:center;font-weight:700}
 #login{position:fixed;inset:0;z-index:100;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:16px}
 #login input{margin:0}
 
@@ -581,6 +585,66 @@ function renderAll() {
   });
 }
 
+/* ---------- quantità con tasti rapidi ---------- */
+function qtyDialog({ title, info = '', label = 'Quantità', unit = 'pz', initial = 1, chips, okLabel = 'OK', okClass = 'primary', extra = '' }) {
+  return new Promise(res => {
+    const kg = unit === 'kg', step = kg ? 0.5 : 1;
+    chips = chips || (kg ? [0.5, 1, 2, 5] : [1, 2, 3, 5, 6, 10, 12, 24]);
+    const m = openModal('<h3>' + title + '</h3>' + (info ? '<div class="qinfo">' + info + '</div>' : '') +
+      '<label class="f">' + label + (kg ? ' (kg)' : ' (pezzi)') + '</label>' +
+      '<div class="row"><button type="button" class="icon-btn qbig" data-d="-1">−</button><input id="qv" inputmode="decimal" class="qinput" value="' + String(initial).replace('.', ',') + '"><button type="button" class="icon-btn qbig" data-d="1">+</button></div>' +
+      '<div class="chips" style="margin-top:8px;flex-wrap:wrap">' + chips.map(n => '<button type="button" class="chip" data-set="' + n + '">' + String(n).replace('.', ',') + '</button>').join('') + '</div>' + extra +
+      '<div class="row-end"><button type="button" class="btn" data-close>Annulla</button><button class="btn ' + okClass + ' big" data-ok>' + okLabel + '</button></div>');
+    const inp = m.querySelector('#qv'); setTimeout(() => { inp.focus(); inp.select(); }, 60);
+    const setV = v => { inp.value = String(r3(Math.max(0, v))).replace('.', ','); };
+    m.querySelectorAll('[data-d]').forEach(b => b.onclick = () => setV(num(inp.value) + step * +b.dataset.d));
+    m.querySelectorAll('[data-set]').forEach(b => b.onclick = () => { setV(+b.dataset.set); inp.focus(); });
+    m._onclose = () => res(null);
+    const ok = () => { const v = r3(num(inp.value)); if (!(v > 0)) { inp.focus(); return; } m._onclose = null; const extraVals = {}; m.querySelectorAll('[data-x]').forEach(x => extraVals[x.dataset.x] = x.value); closeModal(m); res({ q: v, ...extraVals }); };
+    m.querySelector('[data-ok]').onclick = ok;
+    inp.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); ok(); } };
+  });
+}
+function prodInfo(p) {
+  const low = num(p.qty) <= 0;
+  return '<div class="pcard">' + av(p.cat) + '<div class="grow"><div class="nm" style="font-weight:700">' + esc(p.name) + '</div><div class="muted small">' + esc(p.cat || 'Varie') + (p.code ? ' · ▮▯ ' + esc(p.code) : '') + '</div></div>' +
+    '<div style="text-align:right"><b>' + eur(p.price) + (p.unit === 'kg' ? '<span class="muted small">/kg</span>' : '') + '</b><div><span class="pill ' + (low ? 'low' : isLow(p) ? 'warn' : '') + '">' + (low ? 'finito' : fq(p.qty, p.unit)) + '</span></div></div></div>';
+}
+function recordLoad(items, sup, val) {
+  const key = today() + '_' + DEVICE, doc = S.loads[key] || { day: today(), dev: DEVICE, list: [] };
+  save('loads', key, { day: doc.day, dev: DEVICE, list: [...(doc.list || []), { t: Date.now(), sup: sup || '', items, val: r2(val || 0) }] });
+}
+// Codice già registrato: avvisa, mostra il prodotto e (se confermi) lo rifornisce o aggiunge la quantità
+async function linkExisting(p, q0, cost) {
+  if (!p) return false;
+  beep(false);
+  const out = num(p.qty) <= 0;
+  const r = await qtyDialog({
+    title: '⚠️ Codice già registrato',
+    info: 'Questo codice a barre appartiene già a:' + prodInfo(p) + '<div class="small" style="margin-top:8px">' + (out ? 'Il prodotto è <b>finito</b>: indica quanti ne arrivano e lo <b>rifornisco</b>.' : 'Il prodotto è già presente: la quantità che indichi viene <b>aggiunta</b> a quella in magazzino.') + '</div>',
+    label: out ? 'Quantità da rifornire' : 'Quantità da aggiungere', unit: p.unit, initial: q0 > 0 ? q0 : 1,
+    okLabel: out ? '🔄 Rifornisci ' + p.name : '➕ Aggiungi a ' + p.name, okClass: 'paid',
+    extra: '<label class="f">Prezzo di acquisto unitario € (facoltativo)</label><input data-x="cost" inputmode="decimal" placeholder="—" value="' + esc(cost != null ? String(cost).replace('.', ',') : (p.cost != null ? String(p.cost).replace('.', ',') : '')) + '">'
+  });
+  if (!r) return false;
+  const cur = S.products[p.id]; if (!cur) return false;
+  const nq = r3(Math.max(0, num(cur.qty)) + r.q), c = String(r.cost || '').trim();
+  const np = { ...cur, qty: nq, upd: Date.now() }; if (c) np.cost = r2(num(c));
+  save('products', p.id, np);
+  recordLoad([{ p: p.id, n: cur.name, q: r.q, cost: c ? r2(num(c)) : null }], out ? 'Rifornimento' : 'Aggiunta', c ? r.q * num(c) : 0);
+  renderAll();
+  celebrate(out ? '🔄' : '➕', out ? 'Rifornito!' : 'Quantità aggiunta!', cur.name + ': ' + fq(nq, cur.unit));
+  return true;
+}
+// Cassa: prodotto scelto per nome → chiede la quantità
+async function pickQty(p) {
+  if (!p) return;
+  if (p.unit === 'kg') return addToCart(p);
+  const inCart = cart.filter(l => l.pid === p.id).reduce((s, l) => s + l.q, 0);
+  const r = await qtyDialog({ title: '🛒 Aggiungi allo scontrino', info: prodInfo(p) + (inCart ? '<div class="small" style="margin-top:6px">Già nello scontrino: <b>' + inCart + '</b></div>' : ''), unit: 'pz', initial: 1, chips: [1, 2, 3, 4, 5, 6, 10, 12], okLabel: '✓ Aggiungi' });
+  if (r) { addToCart(p, r.q); if (finePointer) $('#cassaIn').focus(); }
+}
+
 /* ================= CASSA ================= */
 let cart = [], lastAdd = 0;
 const CAT_RULES = [[/pane|forno|panett|pizz/, '🥖', 32], [/pasta|riso|farin|cereal/, '🍝', 42], [/latt|formagg|mozz|yogurt|burro/, '🧀', 48], [/salum|affett|prosciut/, '🥓', 8], [/frutt|verdur|ortofr/, '🍅', 100], [/carne|pesce|macell/, '🥩', 355], [/surgel|gelat/, '🧊', 200], [/conserv|scatol|sottol|sughi/, '🥫', 18], [/dolc|snack|biscott|caramell|cioccol/, '🍫', 25], [/colazion|caff|the\b|tisan/, '☕', 30], [/bevand|acqua|bibit|succh/, '🥤', 190], [/vino|alcol|birr|liquor/, '🍷', 340], [/igien|casa|detersiv|pulizi/, '🧴', 210], [/pet|anima/, '🐾', 270], [/gastronom|rosticc|pronto/, '🍲', 15], [/spezi|condim|olio|aceto/, '🫒', 75], [/uova/, '🥚', 45]];
@@ -685,19 +749,19 @@ function wireSearch(inp, box, onPick, ctx) {
     box.innerHTML = r.map(p => '<div class="it" data-pid="' + esc(p.id) + '">' + av(p.cat) + '<div class="grow"><div class="nm">' + esc(p.name) + '</div><div class="muted small">' + esc(p.cat || '') + ' · ' + fq(p.qty, p.unit) + '</div></div><b>' + eur(p.price) + '</b></div>').join('');
     box.hidden = false;
   });
-  box.addEventListener('click', e => { const it = e.target.closest('[data-pid]'); if (!it) return; onPick(P(it.dataset.pid)); inp.value = ''; hide(); if (finePointer) inp.focus(); });
+  box.addEventListener('click', e => { const it = e.target.closest('[data-pid]'); if (!it) return; onPick(P(it.dataset.pid), 'name'); inp.value = ''; hide(); if (finePointer) inp.focus(); });
   inp.addEventListener('keydown', e => {
     if (e.key === 'Escape') { inp.value = ''; hide(); }
     if (e.key !== 'Enter') return; e.preventDefault();
     const v = inp.value.trim(); if (!v) return;
     const p = byCode(v);
-    if (p) { beep(); onPick(p); }
-    else { const r = search(v); if (r.length === 1) onPick(r[0]); else if (r.length > 1) { const f = box.querySelector('[data-pid]'); if (f) onPick(P(f.dataset.pid)); } else { if (/^\d{4,}$/.test(v)) { beep(false); unknownCode(v, ctx); } else { toast('Nessun articolo trovato', 'warn'); return; } } }
+    if (p) { beep(); onPick(p, 'code'); }
+    else { const r = search(v); if (r.length === 1) onPick(r[0], 'name'); else if (r.length > 1) { const f = box.querySelector('[data-pid]'); if (f) onPick(P(f.dataset.pid), 'name'); } else { if (/^\d{4,}$/.test(v)) { beep(false); unknownCode(v, ctx); } else { toast('Nessun articolo trovato', 'warn'); return; } } }
     inp.value = ''; hide();
   });
   document.addEventListener('click', e => { if (!box.contains(e.target) && e.target !== inp) hide(); });
 }
-wireSearch($('#cassaIn'), $('#cassaSug'), p => addToCart(p), 'cassa');
+wireSearch($('#cassaIn'), $('#cassaSug'), (p, how) => how === 'name' ? pickQty(p) : addToCart(p), 'cassa');
 $('#cassaScan').onclick = () => openScanner(c => handleCode(c, 'cassa'), { continuous: true, title: 'Scansiona articoli' });
 
 document.querySelectorAll('[data-pay]').forEach(b => b.onclick = async () => {
@@ -837,7 +901,19 @@ function editProduct(id, preset = {}) {
     m._onclose = () => res(null);
     const marg = () => { const pr = num(f.price.value), co = num(f.cost.value); m.querySelector('#marg').textContent = pr && co ? 'Margine: ' + eur(pr - co) + ' (' + Math.round((pr - co) / pr * 100) + '% sul prezzo, ricarico ' + Math.round((pr - co) / co * 100) + '%)' : ''; };
     f.price.oninput = f.cost.oninput = marg; marg();
-    m.querySelector('[data-scan]').onclick = () => openScanner(c => { f.code.value = c; });
+    let linking = false;
+    const checkCode = async () => {
+      const c = f.code.value.trim(); if (id || !c || linking || !CODEIDX[c]) return false;
+      linking = true;
+      const done = await linkExisting(P(CODEIDX[c]), num(f.qty.value), f.cost.value.trim() ? num(f.cost.value) : null);
+      linking = false;
+      if (done) { m._onclose = null; closeModal(m); res(CODEIDX[c]); }
+      else { f.code.value = ''; f.code.focus(); }
+      return true;
+    };
+    f.code.addEventListener('change', checkCode);
+    f.code.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); checkCode(); } });
+    m.querySelector('[data-scan]').onclick = () => openScanner(c => { f.code.value = c; setTimeout(checkCode, 300); });
     m.querySelector('[data-gen]').onclick = () => { let c; do { c = '2' + String(Math.floor(Math.random() * 1e11)).padStart(11, '0'); } while (CODEIDX[c]); f.code.value = c; };
     m.querySelector('[data-newcat]').onclick = async () => { const n = await askText('Nuova categoria', ''); if (!n) return; if (!(S.config.categories || []).includes(n)) save('config', 'main', { ...S.config, categories: [...(S.config.categories || []), n] }); const o = document.createElement('option'); o.textContent = n; o.selected = true; f.cat.appendChild(o); };
     const del = m.querySelector('[data-del]');
@@ -846,7 +922,7 @@ function editProduct(id, preset = {}) {
       e.preventDefault();
       const code = f.code.value.trim(), name = f.name.value.trim();
       if (!name) return;
-      if (code && CODEIDX[code] && CODEIDX[code] !== id) { toast('Questo codice è già usato da: ' + S.products[CODEIDX[code]].name, 'err'); return; }
+      if (code && CODEIDX[code] && CODEIDX[code] !== id) { if (!id) { checkCode(); return; } toast('Questo codice è già usato da: ' + S.products[CODEIDX[code]].name, 'err'); return; }
       if (!f.price.value.trim()) { toast('Inserisci il prezzo di vendita', 'warn'); return; }
       const nid = id || uid();
       const data = { name, code, cat: f.cat.value || 'Varie', price: r2(num(f.price.value)), cost: f.cost.value.trim() ? r2(num(f.cost.value)) : null, unit: f.unit.value, qty: r3(num(f.qty.value)), min: r3(num(f.min.value)), upd: Date.now() };
@@ -946,12 +1022,11 @@ $('#loadOk').onclick = async () => {
   const items = []; let val = 0;
   for (const l of lines) {
     const p = S.products[l.pid], q = r3(num(l.q)), hasCost = l.cost !== '' && l.cost !== null && l.cost !== undefined;
-    const np = { ...p, qty: r3(num(p.qty) + q) }; if (hasCost) np.cost = r2(num(l.cost));
+    const np = { ...p, qty: r3(Math.max(0, num(p.qty)) + q) }; if (hasCost) np.cost = r2(num(l.cost));
     save('products', l.pid, np);
     items.push({ p: l.pid, n: p.name, q, cost: hasCost ? r2(num(l.cost)) : null }); if (hasCost) val += q * num(l.cost);
   }
-  const key = today() + '_' + DEVICE, doc = S.loads[key] || { day: today(), dev: DEVICE, list: [] };
-  save('loads', key, { day: doc.day, dev: DEVICE, list: [...(doc.list || []), { t: Date.now(), sup: $('#supIn').value.trim(), items, val: r2(val) }] });
+  recordLoad(items, $('#supIn').value.trim(), val);
   loadLines = []; $('#supIn').value = ''; renderAll(); toast('✓ Carico registrato, quantità aggiornate');
 };
 
