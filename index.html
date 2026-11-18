@@ -117,6 +117,8 @@ header h1 small{display:block;font:500 11px system-ui,sans-serif;letter-spacing:
 .seg button{border:0;background:var(--card);padding:7px 12px;cursor:pointer;font-size:13px}
 .seg button.on{background:var(--g);color:#fff}
 [hidden]{display:none!important}
+#login{position:fixed;inset:0;z-index:100;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:16px}
+#login input{margin:0}
 
 body.dark{--g:#9a2a3a;--gt:#f2a9b3;--g2:#3a2227;--ok:#2f9a63;--bg:#121211;--card:#1d1c1a;--tx:#ece9e2;--mu:#a29e95;--bd:#33312d;--red:#e5675a;--red2:#3a1f1c;--or:#e9a256;--or2:#36281a;--hov:#262522;--trk:#2c2b28;--orb:#5a4024;--ortx:#f3c690;--redb:#5a2b26;--redtx:#f4b1a8;color-scheme:dark}
 body.dark header{background:#4e131c}
@@ -272,7 +274,7 @@ let DEVICE; try { DEVICE = localStorage.getItem('gn_dev') || uid(); localStorage
 /* ---------- stato & archivio ---------- */
 const DEFAULT_CATS = ['Pane e forno','Pasta, riso e farine','Latticini e formaggi','Salumi','Frutta e verdura','Carne e pesce','Surgelati','Conserve e scatolame','Dolci e snack','Colazione','Bevande','Vino e alcolici','Igiene e casa','Varie'];
 const S = { products:{}, customers:{}, sales:{}, loads:{}, config:{ categories:[] } };
-let DB = null, MODE = 'loading', CANWRITE = true;
+let DB = null, MODE = 'loading', CANWRITE = true, FB = false, FBUSER = null;
 const COLS = ['products','customers','sales','loads'];
 
 function localLoad() {
@@ -283,6 +285,7 @@ function localSave() { try { localStorage.setItem('gn_data', JSON.stringify(S));
 
 const chains = {};
 function dbWrite(path, data) {
+  if (FB) { const ref = DB.doc(path); (data === null ? ref.delete() : ref.set(data)).catch(writeErr); return Promise.resolve(); }
   chains[path] = (chains[path] || Promise.resolve()).then(async () => {
     const ref = DB.doc(path);
     const run = () => data === null ? ref.delete() : ref.set(data);
@@ -297,7 +300,7 @@ function dbWrite(path, data) {
 function writeErr(e) {
   const c = e && e.code;
   if (c === 'quota_exceeded') toast('Spazio dati esaurito: elimina vecchi dati. ' + (e.message||''), 'err');
-  else if (c === 'invalid_argument') { CANWRITE = false; toast('Non hai i permessi per modificare i dati di questo gestionale', 'err'); }
+  else if (c === 'invalid_argument' || c === 'permission-denied') { CANWRITE = false; toast('Non hai i permessi per modificare i dati di questo gestionale', 'err'); }
   else if (c === 'revoked') toast('Accesso ai dati revocato', 'err');
   else toast('Salvataggio non riuscito, controlla la connessione', 'err');
 }
@@ -947,6 +950,7 @@ $('#settingsBtn').onclick = () => {
     '<label class="f">Logo</label><div class="row"><img id="slg" class="logo" style="width:64px;height:64px;flex:0 0 64px" src="' + esc(S.config.logo || LOGO) + '"><label class="btn" style="cursor:pointer">🖼️ Carica il tuo logo<input type="file" accept="image/*" hidden id="slf"></label>' + (S.config.logo ? '<button class="btn ghost" id="slr">Usa logo predefinito</button>' : '') + '</div>' +
     '<label class="f">Nome del negozio</label><div class="row"><input id="snm" value="' + esc(S.config.shop || 'Sfizi e Delizie') + '"><button class="btn primary" id="snmok">Salva</button></div>' +
     '<p class="small muted" style="margin-top:14px">' + (MODE === 'cloud' ? '☁️ I dati sono salvati online e sincronizzati: puoi usare il gestionale da telefono e computer insieme.' : '💾 I dati sono salvati solo in questo browser. Fai spesso una copia di backup.') + '</p>' +
+    (FBUSER ? '<div class="row" style="margin-top:10px"><span class="grow small">👤 Accesso come <b>' + esc(FBUSER.email || '') + '</b></span><button class="btn" id="logout">Esci</button></div>' : '') +
     '<h3 style="font-size:15px;margin-top:14px">Backup</h3><div class="row wrap"><button class="btn" id="bkc">📋 Copia backup</button><button class="btn" id="bki">📥 Ripristina da backup</button></div>' +
     '<textarea id="bkt" rows="5" style="margin-top:8px;font-size:12px" hidden></textarea><div class="row-end"><button class="btn" data-close>Chiudi</button></div>');
   m.querySelector('#slf').onchange = async e => { const f = e.target.files[0]; if (!f) return;
@@ -954,6 +958,7 @@ $('#settingsBtn').onclick = () => {
       c.getContext('2d').drawImage(bmp, (s - w) / 2, (s - hh) / 2, w, hh); let d = c.toDataURL('image/png'); if (d.length > 150000) d = c.toDataURL('image/jpeg', .85);
       save('config', 'main', { ...S.config, logo: d }); m.querySelector('#slg').src = d; setTitle(); toast('Logo aggiornato'); } catch(err) { toast('Immagine non valida', 'err'); } };
   const slr = m.querySelector('#slr'); if (slr) slr.onclick = () => { const c = { ...S.config }; delete c.logo; save('config', 'main', c); m.querySelector('#slg').src = LOGO; setTitle(); slr.remove(); };
+  const lo = m.querySelector('#logout'); if (lo) lo.onclick = async () => { if (await ask('Uscire da questo dispositivo?', 'Esci')) { await firebase.auth().signOut(); location.reload(); } };
   m.querySelector('#snmok').onclick = () => { save('config', 'main', { ...S.config, shop: m.querySelector('#snm').value.trim() }); setTitle(); toast('Salvato'); };
   m.querySelector('#bkc').onclick = async () => { const t = JSON.stringify({ v: 1, at: Date.now(), ...S }); const ta = m.querySelector('#bkt'); ta.hidden = false; ta.value = t;
     try { await navigator.clipboard.writeText(t); toast('Backup copiato: incollalo in una nota o email'); } catch(e) { ta.select(); toast('Copia il testo selezionato', 'warn'); } };
@@ -982,7 +987,7 @@ function subscribe() {
   let pending = 5; const timer = setTimeout(() => { if (pending > 0) setSync('slow'); }, 10000);
   const sub = (q, apply) => { let first = true;
     q.onSnapshot(snap => { apply(snap); if (first && !snap.metadata.fromCache) { first = false; if (--pending <= 0) { clearTimeout(timer); setSync(); } } setTitle(); renderAll(); },
-      err => { if (first) { first = false; pending--; } setSync('err'); toast('Sincronizzazione interrotta: ricarica la pagina', 'err'); }); };
+      err => { if (first) { first = false; pending--; } setSync('err'); toast(err && err.code === 'permission-denied' ? 'Questo account non ha accesso ai dati del negozio' : 'Sincronizzazione interrotta: ricarica la pagina', 'err'); }); };
   const toMap = s => { const o = {}; s.docs.forEach(d => { o[d.id] = d.data(); }); return o; };
   sub(DB.collection('products'), s => S.products = toMap(s));
   sub(DB.collection('customers'), s => S.customers = toMap(s));
@@ -993,9 +998,49 @@ function subscribe() {
 async function init() {
   show(location.hash.slice(1) || 'cassa'); setSync();
   let db = null;
-  try { if (window.claude && typeof window.claude.use === 'function') db = await window.claude.use('db'); } catch(e) { db = null; }
-  if (!db) { MODE = 'local'; localLoad(); setSync(); setTitle(); renderAll(); return; }
-  DB = db; MODE = 'cloud'; setSync(); subscribe();
+  const inClaude = !!(window.claude && typeof window.claude.use === 'function');
+  if (inClaude) { try { db = await window.claude.use('db'); } catch(e) { db = null; } }
+  if (db) { DB = db; MODE = 'cloud'; setSync(); subscribe(); return; }
+  if (!inClaude) {
+    let cfg = null;
+    try { const r = await fetch('firebase-config.json', { cache: 'no-cache' }); if (r.ok) { cfg = await r.json(); if (!cfg || !cfg.apiKey || String(cfg.apiKey).includes('INSERISCI')) cfg = null; } } catch(e) {}
+    if (cfg) { try { await loadFirebase(); return startFirebase(cfg); } catch(e) { toast('Database online non raggiungibile: uso i dati di questo dispositivo', 'err'); } }
+  }
+  MODE = 'local'; localLoad(); setSync(); setTitle(); renderAll();
+}
+/* ---------- Firebase (versione pubblicata su GitHub) ---------- */
+function loadScript(src) { return new Promise((ok, ko) => { const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = ko; document.head.appendChild(s); }); }
+async function loadFirebase() {
+  const v = 'https://www.gstatic.com/firebasejs/10.12.2/';
+  await loadScript(v + 'firebase-app-compat.js');
+  await Promise.all([loadScript(v + 'firebase-auth-compat.js'), loadScript(v + 'firebase-firestore-compat.js')]);
+}
+function startFirebase(cfg) {
+  firebase.initializeApp(cfg);
+  const fs = firebase.firestore();
+  try { fs.settings({ ignoreUndefinedProperties: true }); } catch(e) {}
+  try { fs.enablePersistence({ synchronizeTabs: true }).catch(() => {}); } catch(e) {}
+  setSync();
+  firebase.auth().onAuthStateChanged(u => {
+    FBUSER = u;
+    if (u) { hideLogin(); if (!DB) { DB = fs; FB = true; MODE = 'cloud'; setSync(); subscribe(); } }
+    else showLogin();
+  });
+}
+function hideLogin() { const l = $('#login'); if (l) l.remove(); }
+function showLogin() {
+  if ($('#login')) return;
+  const d = document.createElement('div'); d.id = 'login';
+  d.innerHTML = '<form class="card" style="max-width:360px;width:100%;text-align:center;padding:24px"><img class="logo" src="' + (S.config.logo || LOGO) + '" style="width:96px;height:96px"><h2 style="font-family:\'Playfair Display\',Georgia,serif;font-style:italic;font-size:26px;margin:10px 0 2px">Sfizi e Delizie</h2><div class="muted small" style="margin-bottom:14px">Accedi al gestionale</div>' +
+    '<input id="lem" type="email" autocomplete="username" placeholder="Email" required><input id="lpw" type="password" autocomplete="current-password" placeholder="Password" required style="margin-top:8px">' +
+    '<div id="lerr" class="small" style="color:var(--red);min-height:18px;margin:8px 0"></div><button class="btn primary big full">Entra</button><button type="button" class="btn ghost small" id="lfg" style="margin-top:8px">Password dimenticata?</button></form>';
+  document.body.appendChild(d);
+  const err = t => d.querySelector('#lerr').textContent = t;
+  d.querySelector('form').onsubmit = async e => { e.preventDefault(); err('');
+    try { await firebase.auth().signInWithEmailAndPassword(d.querySelector('#lem').value.trim(), d.querySelector('#lpw').value); }
+    catch(x) { err(/network/.test(x.code || '') ? 'Nessuna connessione internet' : /too-many/.test(x.code || '') ? 'Troppi tentativi, riprova tra qualche minuto' : 'Email o password non corretti'); } };
+  d.querySelector('#lfg').onclick = async () => { const em = d.querySelector('#lem').value.trim(); if (!em) return err('Scrivi prima la tua email');
+    try { await firebase.auth().sendPasswordResetEmail(em); err(''); toast('Ti ho mandato un\'email per cambiare la password'); } catch(x) { err('Email non valida'); } };
 }
 init();
 </script>
