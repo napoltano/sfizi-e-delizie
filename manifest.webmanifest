@@ -1,0 +1,22 @@
+{
+  "name": "Sfizi e Delizie",
+  "short_name": "Sfizi e Delizie",
+  "description": "Gestionale del negozio: cassa, magazzino, carico merce, debiti e statistiche",
+  "lang": "it",
+  "start_url": "./#cassa",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#7a1f2b",
+  "theme_color": "#7a1f2b",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Cassa", "url": "./#cassa", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Carico merce", "url": "./#carico", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Debiti", "url": "./#clienti", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}
