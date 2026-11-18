@@ -950,7 +950,7 @@ $('#settingsBtn').onclick = () => {
     '<label class="f">Logo</label><div class="row"><img id="slg" class="logo" style="width:64px;height:64px;flex:0 0 64px" src="' + esc(S.config.logo || LOGO) + '"><label class="btn" style="cursor:pointer">🖼️ Carica il tuo logo<input type="file" accept="image/*" hidden id="slf"></label>' + (S.config.logo ? '<button class="btn ghost" id="slr">Usa logo predefinito</button>' : '') + '</div>' +
     '<label class="f">Nome del negozio</label><div class="row"><input id="snm" value="' + esc(S.config.shop || 'Sfizi e Delizie') + '"><button class="btn primary" id="snmok">Salva</button></div>' +
     '<p class="small muted" style="margin-top:14px">' + (MODE === 'cloud' ? '☁️ I dati sono salvati online e sincronizzati: puoi usare il gestionale da telefono e computer insieme.' : '💾 I dati sono salvati solo in questo browser. Fai spesso una copia di backup.') + '</p>' +
-    (FBUSER ? '<div class="row" style="margin-top:10px"><span class="grow small">👤 Accesso come <b>' + esc(FBUSER.email || '') + '</b></span><button class="btn" id="logout">Esci</button></div>' : '') +
+    (FBUSER ? '<div class="row" style="margin-top:10px"><span class="grow small">👤 Accesso come <b>' + esc(userName(FBUSER.email)) + '</b></span><button class="btn" id="logout">Esci</button></div>' : '') +
     '<h3 style="font-size:15px;margin-top:14px">Backup</h3><div class="row wrap"><button class="btn" id="bkc">📋 Copia backup</button><button class="btn" id="bki">📥 Ripristina da backup</button></div>' +
     '<textarea id="bkt" rows="5" style="margin-top:8px;font-size:12px" hidden></textarea><div class="row-end"><button class="btn" data-close>Chiudi</button></div>');
   m.querySelector('#slf').onchange = async e => { const f = e.target.files[0]; if (!f) return;
@@ -1027,20 +1027,21 @@ function startFirebase(cfg) {
     else showLogin();
   });
 }
+const USER_DOMAIN = '@sfizi-e-delizie.app';
+const userEmail = u => { u = String(u || '').trim().toLowerCase(); return u.includes('@') ? u : u + USER_DOMAIN; };
+const userName = e => String(e || '').replace(USER_DOMAIN, '');
 function hideLogin() { const l = $('#login'); if (l) l.remove(); }
 function showLogin() {
   if ($('#login')) return;
   const d = document.createElement('div'); d.id = 'login';
   d.innerHTML = '<form class="card" style="max-width:360px;width:100%;text-align:center;padding:24px"><img class="logo" src="' + (S.config.logo || LOGO) + '" style="width:96px;height:96px"><h2 style="font-family:\'Playfair Display\',Georgia,serif;font-style:italic;font-size:26px;margin:10px 0 2px">Sfizi e Delizie</h2><div class="muted small" style="margin-bottom:14px">Accedi al gestionale</div>' +
-    '<input id="lem" type="email" autocomplete="username" placeholder="Email" required><input id="lpw" type="password" autocomplete="current-password" placeholder="Password" required style="margin-top:8px">' +
-    '<div id="lerr" class="small" style="color:var(--red);min-height:18px;margin:8px 0"></div><button class="btn primary big full">Entra</button><button type="button" class="btn ghost small" id="lfg" style="margin-top:8px">Password dimenticata?</button></form>';
+    '<input id="lem" autocomplete="username" autocapitalize="none" placeholder="Utente" required><input id="lpw" type="password" autocomplete="current-password" placeholder="Password" required style="margin-top:8px">' +
+    '<div id="lerr" class="small" style="color:var(--red);min-height:18px;margin:8px 0"></div><button class="btn primary big full">Entra</button></form>';
   document.body.appendChild(d);
   const err = t => d.querySelector('#lerr').textContent = t;
   d.querySelector('form').onsubmit = async e => { e.preventDefault(); err('');
-    try { await firebase.auth().signInWithEmailAndPassword(d.querySelector('#lem').value.trim(), d.querySelector('#lpw').value); }
-    catch(x) { err(/network/.test(x.code || '') ? 'Nessuna connessione internet' : /too-many/.test(x.code || '') ? 'Troppi tentativi, riprova tra qualche minuto' : 'Email o password non corretti'); } };
-  d.querySelector('#lfg').onclick = async () => { const em = d.querySelector('#lem').value.trim(); if (!em) return err('Scrivi prima la tua email');
-    try { await firebase.auth().sendPasswordResetEmail(em); err(''); toast('Ti ho mandato un\'email per cambiare la password'); } catch(x) { err('Email non valida'); } };
+    try { await firebase.auth().signInWithEmailAndPassword(userEmail(d.querySelector('#lem').value), d.querySelector('#lpw').value); }
+    catch(x) { err(/network/.test(x.code || '') ? 'Nessuna connessione internet' : /too-many/.test(x.code || '') ? 'Troppi tentativi, riprova tra qualche minuto' : 'Utente o password non corretti'); } };
 }
 init();
 </script>

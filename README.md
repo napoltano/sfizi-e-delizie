@@ -18,6 +18,6 @@ Il sito è un'unica pagina (`index.html`) pubblicata con GitHub Pages.
 La versione pubblicata su GitHub salva i dati su **Firebase Firestore**, così sono gli stessi su ogni dispositivo. Funziona anche senza internet per un po': le vendite si sincronizzano appena torna la connessione.
 
 - `firebase-config.json`: i dati di collegamento al progetto Firebase (non sono segreti: la protezione è data dal login e dalle regole).
-- `firestore.rules`: le regole di accesso da incollare nella console di Firebase (Firestore → Regole). Solo le email elencate possono entrare.
+- `firestore.rules`: le regole di accesso da incollare nella console di Firebase (Firestore → Regole). Si entra con il nome utente (es. Armens): il gestionale lo trasforma in `armens@sfizi-e-delizie.app`, che è l'indirizzo da usare in Firebase Authentication e nelle regole. La password non è salvata in questo repository.
 
 Finché `firebase-config.json` non è compilato, il gestionale funziona lo stesso ma salva i dati solo sul dispositivo in uso.
