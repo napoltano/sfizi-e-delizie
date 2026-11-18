@@ -1,5 +1,5 @@
 // Service worker di Sfizi e Delizie: rende l'app installabile e la fa aprire anche senza rete.
-const CACHE = 'sd-v3';
+const CACHE = 'sd-v4';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './firebase-config.json', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'];
 const CDN = ['www.gstatic.com', 'cdn.jsdelivr.net', 'fonts.googleapis.com', 'fonts.gstatic.com'];
 
